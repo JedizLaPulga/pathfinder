@@ -76,8 +76,8 @@ class PathfinderApp:
         search_btn.pack(side=tk.LEFT, padx=5)
 
         # Content Area
-        content_frame = tk.Frame(self.root, bg="#1e1e1e", padx=20, pady=(0, 20))
-        content_frame.pack(fill=tk.BOTH, expand=True)
+        content_frame = tk.Frame(self.root, bg="#1e1e1e", padx=20)
+        content_frame.pack(fill=tk.BOTH, expand=True, pady=(0, 20))
 
         # Treeview for results
         columns = ("type", "name", "path")
