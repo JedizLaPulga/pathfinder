@@ -130,7 +130,10 @@ class PathfinderApp:
             while True:
                 item = self.search_engine.results_queue.get_nowait()
                 if item[0] == 'done':
-                    self.status_label.config(text="Search completed.")
+                    if not self.tree.get_children():
+                        self.status_label.config(text="File not found")
+                    else:
+                        self.status_label.config(text="Search completed.")
                     return
                 
                 type_, name, path = item
