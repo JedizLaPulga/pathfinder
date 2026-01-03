@@ -7,7 +7,7 @@ if __name__ == "__main__":
     try:
         # root.iconbitmap('icon.ico') 
         pass
-    except:
+    except Exception:
         pass
         
     app = PathfinderApp(root)

@@ -20,12 +20,8 @@ class SearchEngine:
             self.results_queue.queue.clear()
 
         if root_dirs is None:
-            # Default to all available drives on Windows or root on Unix
-            if os.name == 'nt':
-                import string
-                root_dirs = ['%s:\\' % d for d in string.ascii_uppercase if os.path.exists('%s:\\' % d)]
-            else:
-                root_dirs = ['/']
+            # Default to user home directory for performance and safety
+            root_dirs = [os.path.expanduser("~")]
 
         self.search_thread = threading.Thread(target=self._search_worker, args=(query, root_dirs))
         self.search_thread.daemon = True
