@@ -6,6 +6,11 @@ import platform
 import pyperclip
 from search_engine import SearchEngine
 import queue
+try:
+    from PIL import Image, ImageTk
+    HAS_PILLOW = True
+except ImportError:
+    HAS_PILLOW = False
 
 class PathfinderApp:
     def __init__(self, root):
@@ -83,29 +88,62 @@ class PathfinderApp:
         search_btn = tk.Button(search_frame, text="SEARCH", font=("Segoe UI", 10, "bold"), bg=self.colors["accent"], fg="white", activebackground=self.colors["active_accent"], activeforeground="white", relief=tk.FLAT, command=self.start_search)
         search_btn.pack(side=tk.LEFT, padx=5)
 
-        # Content Area
-        content_frame = tk.Frame(self.root, bg=self.colors["bg"], padx=20)
-        content_frame.pack(fill=tk.BOTH, expand=True, pady=(0, 20))
+        # Main Content Area (Split View)
+        self.paned_window = tk.PanedWindow(self.root, orient=tk.HORIZONTAL, bg=self.colors["bg"], sashwidth=4, sashrelief=tk.FLAT)
+        self.paned_window.pack(fill=tk.BOTH, expand=True, padx=20, pady=(0, 20))
+
+        # Left Pane: Results
+        results_frame = tk.Frame(self.paned_window, bg=self.colors["bg"])
+        self.paned_window.add(results_frame, minsize=400)
 
         # Treeview for results
         columns = ("type", "name", "path")
-        self.tree = ttk.Treeview(content_frame, columns=columns, show="headings", selectmode="browse")
+        self.tree = ttk.Treeview(results_frame, columns=columns, show="headings", selectmode="browse")
         
         self.tree.heading("type", text="Type")
         self.tree.heading("name", text="Name")
         self.tree.heading("path", text="Path")
         
-        self.tree.column("type", width=80, anchor=tk.CENTER)
-        self.tree.column("name", width=250, anchor=tk.W)
-        self.tree.column("path", width=500, anchor=tk.W)
+        self.tree.column("type", width=60, anchor=tk.CENTER)
+        self.tree.column("name", width=200, anchor=tk.W)
+        self.tree.column("path", width=300, anchor=tk.W)
 
-        scrollbar = ttk.Scrollbar(content_frame, orient=tk.VERTICAL, command=self.tree.yview)
+        scrollbar = ttk.Scrollbar(results_frame, orient=tk.VERTICAL, command=self.tree.yview)
         self.tree.configure(yscroll=scrollbar.set)
 
         self.tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
         scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
 
         self.tree.bind("<Double-1>", self.on_double_click)
+        self.tree.bind("<<TreeviewSelect>>", self.on_selection_change)
+        
+        # Context Menu
+        self.context_menu = tk.Menu(self.root, tearoff=0, bg=self.colors["button_bg"], fg=self.colors["fg"], activebackground=self.colors["accent"], borderwidth=0)
+        self.context_menu.add_command(label="Open", command=self.open_selected)
+        self.context_menu.add_command(label="Copy Path", command=self.copy_path)
+        self.context_menu.add_separator()
+        self.context_menu.add_command(label="Reveal in Explorer", command=self.open_selected) # Same as Open for folders
+
+        if platform.system() == "Darwin":
+            self.tree.bind("<Button-2>", self.show_context_menu)
+        else:
+            self.tree.bind("<Button-3>", self.show_context_menu)
+
+        # Right Pane: Preview
+        preview_frame = tk.Frame(self.paned_window, bg=self.colors["entry_bg"], padx=10, pady=10)
+        self.paned_window.add(preview_frame, minsize=200)
+
+        self.preview_title = tk.Label(preview_frame, text="No Selection", font=("Segoe UI", 12, "bold"), bg=self.colors["entry_bg"], fg=self.colors["fg"], anchor="w")
+        self.preview_title.pack(fill=tk.X, pady=(0, 10))
+
+        self.preview_text = tk.Text(preview_frame, bg=self.colors["bg"], fg=self.colors["fg"], font=("Consolas", 9), relief=tk.FLAT, state=tk.DISABLED, wrap=tk.NONE)
+        self.preview_text.pack(fill=tk.BOTH, expand=True)
+        
+        self.preview_image_label = tk.Label(preview_frame, bg=self.colors["bg"])
+        # Initially hidden, pack when needed
+        
+        self.preview_info = tk.Label(preview_frame, text="", bg=self.colors["entry_bg"], fg=self.colors["status_fg"], font=("Segoe UI", 8), anchor="e")
+        self.preview_info.pack(fill=tk.X, pady=(5, 0))
 
         # Status Bar / Actions
         action_frame = tk.Frame(self.root, bg=self.colors["status_bg"], height=50, padx=20)
@@ -114,11 +152,79 @@ class PathfinderApp:
         self.status_label = tk.Label(action_frame, text="Ready", bg=self.colors["status_bg"], fg=self.colors["status_fg"], font=("Segoe UI", 9))
         self.status_label.pack(side=tk.LEFT, pady=10)
 
-        open_btn = tk.Button(action_frame, text="Open Location", bg=self.colors["action_btn_bg"], fg="white", font=("Segoe UI", 9), relief=tk.FLAT, command=self.open_selected)
+        open_btn = tk.Button(action_frame, text="Open", bg=self.colors["action_btn_bg"], fg="white", font=("Segoe UI", 9), relief=tk.FLAT, command=self.open_selected)
         open_btn.pack(side=tk.RIGHT, pady=10, padx=5)
 
-        copy_btn = tk.Button(action_frame, text="Copy Path", bg=self.colors["action_btn_bg"], fg="white", font=("Segoe UI", 9), relief=tk.FLAT, command=self.copy_path)
-        copy_btn.pack(side=tk.RIGHT, pady=10, padx=5)
+    def show_context_menu(self, event):
+        item = self.tree.identify_row(event.y)
+        if item:
+            self.tree.selection_set(item)
+            self.context_menu.post(event.x_root, event.y_root)
+
+    def on_selection_change(self, event):
+        selected = self.tree.selection()
+        if not selected:
+            return
+        
+        item = self.tree.item(selected[0])
+        name = item['values'][1]
+        path = item['values'][2]
+        self.update_preview(name, path)
+
+    def update_preview(self, name, path):
+        self.preview_title.config(text=name)
+        self.preview_text.pack(fill=tk.BOTH, expand=True) # Reset text view
+        self.preview_image_label.pack_forget()           # Hide image view
+        
+        # File Info
+        try:
+            size_bytes = os.path.getsize(path)
+            size_str = f"{size_bytes} bytes"
+            if size_bytes > 1024: size_str = f"{size_bytes/1024:.1f} KB"
+            if size_bytes > 1024*1024: size_str = f"{size_bytes/(1024*1024):.1f} MB"
+            self.preview_info.config(text=f"Size: {size_str}")
+        except OSError:
+            self.preview_info.config(text="Size: Unknown")
+
+        if os.path.isdir(path):
+            self.set_preview_text("[Folder]")
+            return
+
+        # Check for image
+        lower_name = name.lower()
+        if lower_name.endswith(('.png', '.jpg', '.jpeg', '.gif', '.bmp', '.ico')):
+            if HAS_PILLOW:
+                try:
+                    img = Image.open(path)
+                    img.thumbnail((300, 300))
+                    photo = ImageTk.PhotoImage(img)
+                    self.preview_image_label.config(image=photo)
+                    self.preview_image_label.image = photo # Keep reference
+                    self.preview_text.pack_forget()
+                    self.preview_image_label.pack(fill=tk.BOTH, expand=True)
+                    return
+                except Exception:
+                    self.set_preview_text("[Image Error]")
+            else:
+                self.set_preview_text("[Image Preview Unavailable - Install Pillow]")
+
+        # Try Reading Text
+        try:
+            if size_bytes > 1024 * 1024: # > 1MB
+                self.set_preview_text("[File too large to preview]")
+                return
+                
+            with open(path, 'r', encoding='utf-8', errors='replace') as f:
+                content = f.read(4000) # Read first 4KB
+                self.set_preview_text(content)
+        except Exception:
+             self.set_preview_text("[Binary or Unreadable File]")
+
+    def set_preview_text(self, text):
+        self.preview_text.config(state=tk.NORMAL)
+        self.preview_text.delete(1.0, tk.END)
+        self.preview_text.insert(1.0, text)
+        self.preview_text.config(state=tk.DISABLED)
 
     def start_search(self, event=None):
         query = self.search_query.get().strip()
